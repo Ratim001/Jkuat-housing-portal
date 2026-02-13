@@ -45,11 +45,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($check_result->num_rows > 0) {
             $error = 'Email address is already in use by another applicant.';
         } else {
-            // Update profile using prepared statements
+            // Update profile using prepared statements (normalized next_of_kin_* columns only)
             $update_stmt = $conn->prepare("UPDATE applicants SET name = ?, email = ?, contact = ?, next_of_kin_name = ?, next_of_kin_contact = ? WHERE applicant_id = ?");
             $update_stmt->bind_param("ssssss", $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $applicant_id);
 
-            if ($update_stmt->execute()) {
+            if ($update_stmt && $update_stmt->execute()) {
                 $success = 'Profile updated successfully!';
                 // Refresh applicant data
                 $stmt = $conn->prepare("SELECT * FROM applicants WHERE applicant_id = ?");
