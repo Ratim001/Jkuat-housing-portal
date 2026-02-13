@@ -1,0 +1,1 @@
+{"version":1,"defects":[],"times":{"ValidationTest::testValidateName":0.013,"ValidationTest::testValidateEmail":0.002,"ValidationTest::testValidatePhone":0,"ValidationTest::testValidateUsername":0,"ValidationTest::testValidatePassword":0}}

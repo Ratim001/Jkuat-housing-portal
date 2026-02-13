@@ -1,0 +1,14 @@
+{
+  "name": "jkuat/staff-housing",
+  "description": "JKUAT Staff Housing Portal - production readiness",
+  "require": {
+    "php": ">=7.4",
+    "phpmailer/phpmailer": "^6.8"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.6"
+  },
+  "scripts": {
+    "test": "phpunit --configuration phpunit.xml || php -f tests/run_tests.php"
+  }
+}
