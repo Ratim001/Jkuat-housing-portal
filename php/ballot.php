@@ -39,16 +39,63 @@ function generateBallotId($conn) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_ballot'])) {
-    $ballot_id = generateBallotId($conn);
-    $house_id = $_POST['house_id'];
-    $ballot_no = $_POST['ballot_no'];
-    $date_of_ballot = $_POST['date_of_ballot'];
-    $status = "Open";
+// Ballot control state
+$ballot_open = false;
+$ballot_closing = null;
+// Safely attempt to read ballot_control; if the table doesn't exist, default to closed
+try {
+    $bc_res = mysqli_query($conn, "SELECT is_open, end_date FROM ballot_control WHERE id = 1 LIMIT 1");
+    if ($bc_res && $bc_row = mysqli_fetch_assoc($bc_res)) {
+        $ballot_open = (bool)$bc_row['is_open'];
+        $ballot_closing = $bc_row['end_date'];
+    }
+} catch (mysqli_sql_exception $e) {
+    $ballot_open = false;
+    $ballot_closing = null;
+}
 
-    $stmt = $conn->prepare("INSERT INTO balloting (ballot_id, applicant_id, house_id, ballot_no, date_of_ballot, status) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("ssssss", $ballot_id, $applicant_id, $house_id, $ballot_no, $date_of_ballot, $status);
-    $stmt->execute();
+function generateBallotNo($conn) {
+    // generate a 4-digit ballot number that's not yet used
+    $tries = 0;
+    do {
+        $n = rand(1000, 9999);
+        $res = mysqli_query($conn, "SELECT ballot_no FROM balloting WHERE ballot_no = '$n' LIMIT 1");
+        $tries++;
+        if ($tries > 50) {
+            // fallback to unique prefix
+            return uniqid('B');
+        }
+    } while ($res && mysqli_num_rows($res) > 0);
+    return (string)$n;
+}
+
+$ballot_error = '';
+$ballot_success = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_ballot'])) {
+    if (!$ballot_open) {
+        $ballot_error = 'Ballots are currently closed. Please wait for the administrator to start the ballot.';
+    } else {
+        $ballot_id = generateBallotId($conn);
+        $house_id = $_POST['house_id'] ?? null;
+        $date_of_ballot = $_POST['date_of_ballot'] ?? date('Y-m-d');
+        $status = "Open";
+
+        if (empty($house_id)) {
+            $ballot_error = 'Please select a house to ballot for.';
+        } else {
+            $ballot_no = generateBallotNo($conn);
+
+            $stmt = $conn->prepare("INSERT INTO balloting (ballot_id, applicant_id, house_id, ballot_no, date_of_ballot, status) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("ssssss", $ballot_id, $applicant_id, $house_id, $ballot_no, $date_of_ballot, $status);
+            
+            if ($stmt->execute()) {
+                $ballot_success = "Ballot submitted successfully! Your ballot number is {$ballot_no}.";
+            } else {
+                $ballot_error = "Error submitting ballot. Please try again.";
+            }
+        }
+    }
 }
 ?>
 
@@ -218,6 +265,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_ballot'])) {
             background-color: #006400;
             color: white;
         }
+
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
     </style>
 </head>
 <body>
@@ -243,19 +309,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_ballot'])) {
 
     <h2>Start Balloting</h2>
 
+    <?php if ($ballot_error): ?>
+        <div class="alert alert-error"><?= htmlspecialchars($ballot_error) ?></div>
+    <?php endif; ?>
+
+    <?php if ($ballot_success): ?>
+        <div class="alert alert-success"><?= htmlspecialchars($ballot_success) ?></div>
+    <?php endif; ?>
+
     <form method="POST">
-        <label>Select a Ballot Number</label>
-        <div class="grid" id="ballotGrid">
-            <?php for ($i = 1000; $i <= 1015; $i++): ?>
-                <div class="house-card ballot-number" data-value="<?= $i ?>" onclick="selectBallotNumber(this)">
-                    <?= $i ?>
-                </div>
-            <?php endfor; ?>
-        </div>
-        <input type="hidden" name="ballot_no" id="selectedBallotNo" required>
+        <?php if ($ballot_open): ?>
+            <div class="alert alert-success">Ballots are OPEN. Closing date: <?= htmlspecialchars(date('F j, Y', strtotime($ballot_closing))) ?></div>
+        <?php else: ?>
+            <div class="alert alert-error">Ballots are currently closed. You cannot submit a ballot right now.</div>
+        <?php endif; ?>
 
         <label>Date of Ballot</label>
-        <input type="date" name="date_of_ballot" required>
+        <input type="date" name="date_of_ballot" value="<?= htmlspecialchars(date('Y-m-d')) ?>" required>
 
         <label>Select House Category</label>
         <select id="categorySelect" onchange="filterHouses()" required>
@@ -279,7 +349,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_ballot'])) {
         </div>
         <input type="hidden" name="house_id" id="selectedHouse" required>
 
-        <button type="submit" name="submit_ballot">Submit Ballot</button>
+        <button type="submit" name="submit_ballot" <?= $ballot_open ? '' : 'disabled' ?>>Submit Ballot</button>
     </form>
 
     <h2>My Ballots</h2>
@@ -325,11 +395,7 @@ function selectHouse(card) {
     document.getElementById('selectedHouse').value = card.dataset.id;
 }
 
-function selectBallotNumber(el) {
-    document.querySelectorAll('#ballotGrid .ballot-number').forEach(b => b.classList.remove('selected'));
-    el.classList.add('selected');
-    document.getElementById('selectedBallotNo').value = el.dataset.value;
-}
+// ballot numbers are auto-generated server-side now; no client-side selection needed
 
 const profileIcon = document.querySelector('.profile-icon');
 const profileMenu = document.getElementById('profileMenu');

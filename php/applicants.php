@@ -51,6 +51,22 @@ $applications->bind_param("s", $applicant_id);
 $applications->execute();
 $results = $applications->get_result();
 
+// Ballot control state for applicants dashboard
+$ballot_open = false;
+$ballot_closing = null;
+// Safely attempt to read ballot_control; if the table doesn't exist, default to closed
+try {
+    $bc_res = mysqli_query($conn, "SELECT is_open, end_date FROM ballot_control WHERE id = 1 LIMIT 1");
+    if ($bc_res && $bc_row = mysqli_fetch_assoc($bc_res)) {
+        $ballot_open = (bool)$bc_row['is_open'];
+        $ballot_closing = $bc_row['end_date'];
+    }
+} catch (mysqli_sql_exception $e) {
+    // Table likely missing — leave ballots closed and continue
+    $ballot_open = false;
+    $ballot_closing = null;
+}
+
 // Active page detection
 $current = basename($_SERVER['PHP_SELF']);
 ?>
@@ -222,7 +238,11 @@ $current = basename($_SERVER['PHP_SELF']);
 <body>
 
 <div class="sidebar">
+    <div style="text-align: center; margin-bottom: 20px;">
+        <img src="../images/2logo.png" alt="JKUAT Logo" style="width: 60px; height: auto;">
+    </div>
     <h2><strong>Applicant Portal</strong></h2>
+    <p style="color: #ccc; font-size: 12px; margin: 10px 0 20px 0;">Navigation</p>
     <a href="applicants.php" class="<?= $current === 'applicants.php' ? 'active' : '' ?>">Apply</a>
     <a href="ballot.php" class="<?= $current === 'ballot.php' ? 'active' : '' ?>">Balloting</a>
     <a href="notifications.php" class="<?= $current === 'notifications.php' ? 'active' : '' ?>">Notifications</a>
@@ -244,29 +264,47 @@ $current = basename($_SERVER['PHP_SELF']);
 
     <div class="header">Apply for a Vacant House</div>
 
-    <form method="POST">
-        <div>
-            <label>Category</label>
-            <select name="category" required>
-                <option value="">Select</option>
-                <option value="1 Bedroom">1 Bedroom</option>
-                <option value="2 Bedroom">2 Bedroom</option>
-                <option value="3 Bedroom">3 Bedroom</option>
-                <option value="4 Bedroom">4 Bedroom</option>
-            </select>
+    <?php if ($ballot_open): ?>
+        <div style="background:#e6f4ea;padding:15px;border:1px solid #c3e6cb;border-radius:6px;margin-bottom:16px;">
+            <strong>Ballots are OPEN.</strong> Closing date: <?= htmlspecialchars(date('F j, Y', strtotime($ballot_closing))) ?>.
+            <div style="margin-top:8px;"><a href="ballot.php" style="background:#006400;color:#fff;padding:8px 12px;border-radius:4px;text-decoration:none;">Go to Balloting</a></div>
         </div>
-        <div>
-            <label>House No</label>
-            <input type="text" name="house_no" required>
-        </div>
-        <div>
-            <label>Date</label>
-            <input type="date" name="apply_date" required>
-        </div>
-        <div style="align-self: end;">
-            <button type="submit" name="apply_house">Apply</button>
-        </div>
-    </form>
+    <?php else: ?>
+        <form method="POST">
+            <div>
+                <label>Category</label>
+                <select name="category" id="categorySelect" required onchange="filterHousesForApply()">
+                    <option value="">Select</option>
+                    <option value="1 Bedroom">1 Bedroom</option>
+                    <option value="2 Bedroom">2 Bedroom</option>
+                    <option value="3 Bedroom">3 Bedroom</option>
+                    <option value="4 Bedroom">4 Bedroom</option>
+                </select>
+            </div>
+            <div>
+                <label>House No</label>
+                <select name="house_no" id="houseSelect" required>
+                    <option value="">Select a house</option>
+                    <?php
+                    $house_q = "SELECT house_id, house_number, category FROM houses WHERE status = 'Vacant' ORDER BY house_number ASC";
+                    $house_res = mysqli_query($conn, $house_q);
+                    while ($h = mysqli_fetch_assoc($house_res)) {
+                        $display = $h['house_number'] ? $h['house_number'] : $h['house_id'];
+                        $cat = $h['category'];
+                        echo '<option value="' . htmlspecialchars($display) . '" data-cat="' . htmlspecialchars($cat) . '">'.htmlspecialchars($display).' ('.htmlspecialchars($cat).')</option>';
+                    }
+                    ?>
+                </select>
+            </div>
+            <div>
+                <label>Date</label>
+                <input type="date" name="apply_date" required>
+            </div>
+            <div style="align-self: end;">
+                <button type="submit" name="apply_house">Apply</button>
+            </div>
+        </form>
+    <?php endif; ?>
 
     <div class="header">Your Applications</div>
     <table>
@@ -386,6 +424,28 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 });
+
+// Filter houses in Apply form by selected category
+function filterHousesForApply() {
+    const cat = document.getElementById('categorySelect').value;
+    const houseSelect = document.getElementById('houseSelect');
+    if (!houseSelect) return;
+    for (let i = 0; i < houseSelect.options.length; i++) {
+        const opt = houseSelect.options[i];
+        const optCat = opt.dataset.cat || '';
+        if (cat === '' || optCat === cat) {
+            opt.hidden = false;
+        } else {
+            // hide non-matching options
+            opt.hidden = true;
+        }
+    }
+    // if current selection is hidden, reset
+    if (houseSelect.selectedOptions.length && houseSelect.selectedOptions[0].hidden) {
+        houseSelect.value = '';
+    }
+}
+</script>
 </script>
 
 

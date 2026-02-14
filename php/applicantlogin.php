@@ -151,19 +151,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         exit;
                     }
 
-                    // Check if promoted to tenant
+                    // If this applicant has an associated tenant record, store the tenant_id
+                    // in session but still land them on the applicant portal. This avoids
+                    // surprising redirects into the tenant dashboard when users intend
+                    // to use applicant features (apply, ballot, profile, notifications).
                     $tenant_id = getTenantId($conn, $applicant_id);
                     if ($tenant_id) {
                         $_SESSION['tenant_id'] = $tenant_id;
-                        $_SESSION['username'] = $user['username'];
-                        header("Location: mytenants.php");
-                        exit;
-                    } else {
-                        $_SESSION['applicant_id'] = $applicant_id;
-                        $_SESSION['username'] = $user['username'];
-                        header("Location: applicants.php");
-                        exit;
                     }
+                    $_SESSION['applicant_id'] = $applicant_id;
+                    $_SESSION['username'] = $user['username'];
+                    header("Location: applicants.php");
+                    exit;
                 } else {
                     $error = "Incorrect password.";
                 }

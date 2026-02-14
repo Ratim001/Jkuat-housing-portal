@@ -12,11 +12,50 @@ $applications = mysqli_query($conn, "SELECT * FROM applications ORDER BY date DE
 $ballots = mysqli_query($conn, "SELECT * FROM balloting ORDER BY date_of_ballot DESC");
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $adminId = $_SESSION['user_id'] ?? 'user002';
+
+    // START BALLOT: enable ballots and notify applicants
     if (isset($_POST['start_ballot'])) {
-        // Optional logging
+        $conn->query("UPDATE ballot_control SET is_open = 1, start_date = NOW(), end_date = DATE_ADD(NOW(), INTERVAL 14 DAY) WHERE id = 1");
+
+        $res = mysqli_query($conn, "SELECT applicant_id, name FROM applicants");
+        $closing = date('Y-m-d', strtotime('+14 days'));
+        $dateSent = date('Y-m-d H:i:s');
+        while ($row = mysqli_fetch_assoc($res)) {
+            $notificationId = uniqid('NT');
+            $recipientId = $row['applicant_id'];
+            $name = $row['name'] ?: 'Applicant';
+            $message = "Hey \"{$name}\" this is to notify you ballots/bidding has begun. Closing date will be {$closing}";
+            $title = 'Admin';
+            $conn->query("INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, title, message, date_sent, date_received, status) VALUES ('$notificationId', '$adminId', 'applicant', '$recipientId', '$title', '" . mysqli_real_escape_string($conn, $message) . "', '$dateSent', '$dateSent', 'unread')");
+        }
+
+        header("Location: manage_applicants.php");
+        exit;
+
+    // END BALLOT: disable ballots and notify applicants
     } elseif (isset($_POST['end_ballot'])) {
-        // Optional logging
+        $conn->query("UPDATE ballot_control SET is_open = 0, end_date = NOW() WHERE id = 1");
+
+        $res = mysqli_query($conn, "SELECT applicant_id, name FROM applicants");
+        $dateSent = date('Y-m-d H:i:s');
+        while ($row = mysqli_fetch_assoc($res)) {
+            $notificationId = uniqid('NT');
+            $recipientId = $row['applicant_id'];
+            $name = $row['name'] ?: 'Applicant';
+            $message = "Hey \"{$name}\" this is to notify you ballots/bidding has closed.";
+            $title = 'Admin';
+            $conn->query("INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, title, message, date_sent, date_received, status) VALUES ('$notificationId', '$adminId', 'applicant', '$recipientId', '$title', '" . mysqli_real_escape_string($conn, $message) . "', '$dateSent', '$dateSent', 'unread')");
+        }
+
+        header("Location: manage_applicants.php");
+        exit;
+
+    // CHOOSE WINNERS: randomly pick winners per house, create tenants, and notify winners/losers
     } elseif (isset($_POST['choose_winner'])) {
+        // ensure ballots are closed when choosing winners
+        $conn->query("UPDATE ballot_control SET is_open = 0, end_date = NOW() WHERE id = 1");
+
         $groupedApps = mysqli_query($conn, "SELECT house_no FROM applications WHERE status = 'Pending' GROUP BY house_no");
 
         while ($group = mysqli_fetch_assoc($groupedApps)) {
@@ -48,8 +87,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $insert->execute();
 
                 $conn->query("UPDATE applicants SET status = 'Tenant' WHERE applicant_id = '{$winner['applicant_id']}'");
+
+                // Notify winner
+                $adminId = $_SESSION['user_id'] ?? 'user002';
+                $dateSent = date('Y-m-d H:i:s');
+                $resWinner = mysqli_query($conn, "SELECT name FROM applicants WHERE applicant_id = '{$winner['applicant_id']}'");
+                $winnerName = ($rw = mysqli_fetch_assoc($resWinner)) ? $rw['name'] : 'Applicant';
+                $notificationId = uniqid('NT');
+                $title = 'Admin';
+                $message = "Hey \"{$winnerName}\" congratulations, you have won the ballot for house {$winner['house_no']}.";
+                $conn->query("INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, title, message, date_sent, date_received, status) VALUES ('$notificationId', '$adminId', 'applicant', '{$winner['applicant_id']}', '$title', '" . mysqli_real_escape_string($conn, $message) . "', '$dateSent', '$dateSent', 'unread')");
+
+                // Notify losers for this house
+                foreach ($apps as $appItem) {
+                    if ($appItem['application_id'] === $winner['application_id']) continue;
+                    $loserId = $appItem['applicant_id'];
+                    $resL = mysqli_query($conn, "SELECT name FROM applicants WHERE applicant_id = '$loserId'");
+                    $lname = ($rl = mysqli_fetch_assoc($resL)) ? $rl['name'] : 'Applicant';
+                    $nId = uniqid('NT');
+                    $lmsg = "Hey \"{$lname}\" the ballot has closed; you were not selected for house {$house}.";
+                    $conn->query("INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, title, message, date_sent, date_received, status) VALUES ('$nId', '$adminId', 'applicant', '$loserId', '$title', '" . mysqli_real_escape_string($conn, $lmsg) . "', '$dateSent', '$dateSent', 'unread')");
+                }
             }
         }
+
         header("Location: manage_applicants.php");
         exit;
     } elseif (isset($_POST['send_notification'])) {
