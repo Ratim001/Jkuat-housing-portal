@@ -117,6 +117,53 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['ajax'])) {
         }
 
         $conn->commit();
+
+        // If this was an update and the status transitioned to VACANT, notify pending applicants in this category
+        if (isset($old_row) && strtolower($old_row['status']) !== 'vacant' && strtolower($status) === 'vacant') {
+            try {
+                // Notify applicants who applied for this category and are in 'Applied' or 'Pending' state
+                // Join to applicants to get email address for sending mail as well as avoiding duplicate notifications per applicant
+                $note_stmt = $conn->prepare("SELECT a.applicant_id, ap.email FROM applications a JOIN applicants ap ON a.applicant_id = ap.applicant_id WHERE a.category = ? AND LOWER(a.status) IN ('applied','pending') GROUP BY a.applicant_id");
+                $note_stmt->bind_param('s', $category);
+                $note_stmt->execute();
+                $res = $note_stmt->get_result();
+                $now = date('Y-m-d H:i:s');
+                $actor = $_SESSION['user_id'] ?? 'system';
+                while ($app = $res->fetch_assoc()) {
+                    $recipient = $app['applicant_id'];
+                    $recipientEmail = $app['email'] ?? null;
+                    $notification_id = 'NT' . substr(md5(uniqid()), 0, 10);
+                    $title = 'House Available: ' . $house_no;
+                    $message = "A house ({$house_no}) in category {$category} has become vacant. Please visit Balloting to place your ballot for this category.";
+                    $ins = $conn->prepare("INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, title, message, date_sent, status) VALUES (?, ?, 'applicant', ?, ?, ?, ?, 'unread')");
+                    if ($ins) {
+                        $ins->bind_param('sssss', $notification_id, $actor, $recipient, $title, $message, $now);
+                        $ins->execute();
+                    }
+
+                    // Send email if available; use notify_and_email() to also create an in-system notification
+                    if (!empty($recipientEmail)) {
+                        try {
+                            require_once __DIR__ . '/../includes/helpers.php';
+                            require_once __DIR__ . '/../includes/email.php';
+                            $htmlBody = build_email_wrapper('<p>' . htmlspecialchars($message) . '</p>');
+                            if (function_exists('notify_and_email')) {
+                                notify_and_email($conn, 'applicant', $recipient, $recipientEmail, $title, $htmlBody, $title);
+                            } else {
+                                // Fallback: send HTML email directly
+                                send_email($recipientEmail, $title, $htmlBody, true);
+                            }
+                        } catch (Exception $e) {
+                            error_log('Failed sending vacancy email to ' . $recipientEmail . ': ' . $e->getMessage());
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                // Don't fail the main request for notification errors; just log
+                error_log('Notify pending applicants error: ' . $e->getMessage());
+            }
+        }
+
         echo json_encode(["success" => true, "house" => compact("house_id", "house_no", "category", "creator", "date_created", "rent", "status")]);
     } catch (Exception $e) {
         $conn->rollback();
@@ -182,20 +229,24 @@ $houses = mysqli_query($conn, "SELECT * FROM houses ORDER BY house_id ASC");
     <title>CS Admin - Houses | JKUAT Staff Housing Portal</title>
     <link rel="stylesheet" href="../css/csdashboard.css">
     <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
-        .sidebar { width: 250px; background-color: #006400; color: #fff; height: 100vh; position: fixed; padding: 20px 10px; }
-        .main-content { margin-left: 250px; padding: 20px; }
+        body { font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
+        .sidebar { width: 220px; background-color: #004225; color: #fff; height: 100vh; position: fixed; padding: 20px 0; overflow-y: auto; }
+        .sidebar img { width: 60px; margin-bottom: 10px; }
+        .sidebar h2, .sidebar p { margin-bottom: 10px; }
+        .sidebar nav ul { list-style: none; padding: 0; }
+        .sidebar nav ul li { margin: 15px 0; }
+        .sidebar nav ul li a { color: #fff; text-decoration: none; font-weight: bold; }
+        .main-content { margin-left: 220px; padding: 40px; }
         .top-header { background-color: #fff; padding: 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ddd; }
         .top-header h1 { color: #006400; margin: 0; }
         .user-icon { width: 40px; height: 40px; border-radius: 50%; cursor: pointer; }
-        h3 { color:rgb(241, 241, 241); margin-top: 20px; }
-        h2 { color:rgb(26, 119, 31); margin-top: 20px; }
+        h2 { color: #006400; margin-top: 20px; margin-bottom: 10px; }
         .controls { display: flex; justify-content: space-between; flex-wrap: wrap; margin-top: 20px; align-items: center; }
         .left-controls { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
         .filters select, #searchInput { padding: 8px; border-radius: 5px; border: 1px solid #ccc; }
         .btn-green { background-color: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
-        table { width: 100%; margin-top: 20px; border-collapse: collapse; background: #fff; }
-        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
         thead tr { background-color: #006400; color: white; }
         .action-btns button { margin-right: 5px; padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer; }
         .update { background-color: #90ee90; color: #000; }
@@ -205,17 +256,113 @@ $houses = mysqli_query($conn, "SELECT * FROM houses ORDER BY house_id ASC");
         .modal-content h2 { color: #006400; }
         .modal-content label { display: block; margin-top: 10px; }
         .modal-content input, .modal-content select { width: 100%; padding: 8px; margin-top: 5px; margin-bottom: 10px; border-radius: 4px; border: 1px solid #ccc; }
-        .submit-btn { background-color: #28a745; color: #fff; padding: 10px; border: none; border-radius: 5px; }
-        .close-btn { background-color: #6c757d; color: #fff; padding: 10px; border: none; border-radius: 5px; margin-left: 10px; }
+        .submit-btn { background-color: #28a745; color: #fff; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
+        .close-btn { background-color: #6c757d; color: #fff; padding: 10px; border: none; border-radius: 5px; margin-left: 10px; cursor: pointer; }
+        .profile-menu {
+            display: none;
+            position: absolute;
+            right: 20px;
+            top: 70px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 150px;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .profile-menu a {
+            display: block;
+            padding: 10px;
+            color: #006400;
+            text-decoration: none;
+        }
+        .profile-menu a:hover {
+            background-color: #f0f0f0;
+        }
+
+        /* Hamburger Menu Styles */
+        .hamburger-menu {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .hamburger-menu span {
+            width: 25px;
+            height: 3px;
+            background-color: #004225;
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -220px;
+                z-index: 100;
+                transition: left 0.3s ease;
+            }
+            .hamburger-menu {
+                display: flex;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+            .top-header {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .top-header h1 {
+                font-size: 18px;
+                flex: 1;
+            }
+            table {
+                font-size: 12px;
+            }
+            th, td {
+                padding: 6px;
+            }
+        }
+        @media (max-width: 480px) {
+            .sidebar {
+                width: 200px;
+            }
+            .top-header h1 {
+                font-size: 14px;
+            }
+        }
     </style>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
 
-<div class="sidebar">
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="sidebar" id="sidebar">
     <img src="../images/2logo.png" alt="Logo">
-    <h3>CS ADMIN</h3>
-    <p>HOUSES</p>
+    <h2><strong>CS ADMIN</strong></h2>
+    <p style="color: #ccc; font-size: 12px; margin: 10px 0 20px 0;">HOUSES</p>
     <nav>
         <ul>
             <li><a href="csdashboard.php">Dashboard</a></li>
@@ -232,8 +379,19 @@ $houses = mysqli_query($conn, "SELECT * FROM houses ORDER BY house_id ASC");
 
 <div class="main-content">
     <header class="top-header">
+        <button class="hamburger-menu" id="hamburgerBtn" onclick="toggleSidebar()">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
         <h1>JKUAT STAFF HOUSING PORTAL</h1>
-        <img src="../images/p-icon.png" alt="User Icon" class="user-icon" onclick="toggleMenu()">
+        <div style="position: relative;">
+            <img src="../images/p-icon.png" alt="User Icon" class="user-icon" onclick="toggleMenu()">
+            <div class="profile-menu" id="profileMenu">
+                <a href="#">Profile</a>
+                <a href="login.php">Logout</a>
+            </div>
+        </div>
     </header>
 
     <h2>Manage Houses</h2>
@@ -441,6 +599,52 @@ document.getElementById("entriesSelect").addEventListener("change", applyFilters
 
 // Initial run
 window.addEventListener("load", applyFilters);
+
+// Hamburger Menu Toggle Function
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Profile Menu Toggle Function
+function toggleMenu() {
+    const menu = document.getElementById("profileMenu");
+    menu.style.display = menu.style.display === "block" ? "none" : "block";
+}
+
+window.onclick = function(e) {
+    if (!e.target.matches('.user-icon')) {
+        const dropdown = document.getElementById("profileMenu");
+        if (dropdown && dropdown.style.display === "block") {
+            dropdown.style.display = "none";
+        }
+    }
+}
+
+// Close sidebar when overlay is clicked
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    }
+    
+    // Close sidebar when a link is clicked
+    const sidebarLinks = document.querySelectorAll('.sidebar a');
+    sidebarLinks.forEach(link => {
+        link.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    });
+});
 </script>
 
 

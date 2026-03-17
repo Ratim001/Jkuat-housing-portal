@@ -1,6 +1,7 @@
 <?php
 require_once '../includes/init.php';
 require_once '../includes/db.php';
+require_once '../includes/auth.php';
 
 // Show PHP errors (for debugging—remove on production)
 ini_set('display_errors', 1);
@@ -30,8 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 if ($user['role'] == 'ICT Admin') {
                     header('Location: ictdashboard.php');
                     exit;
-                } elseif ($user['role'] == 'CS Admin') {
-                    header('Location: csdashboard.php');  // 🔑 You'll need to create this page
+                } elseif (is_cs_admin()) {
+                    header('Location: csdashboard.php');
                     exit;
                 } else {
                     $error = 'Access denied. Unknown role.';
@@ -64,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     <div class="right-panel">
         <img src="../images/logo.png" alt="JKUAT Logo" class="login-logo">
-        <h2>Hi, welcome back</h2>
+        <h2>JKUAT STAFF HOUSING PORTAL</h2>
         <p>Please fill in your details to log in</p>
 
         <?php if (!empty($error)): ?>

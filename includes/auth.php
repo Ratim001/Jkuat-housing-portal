@@ -13,3 +13,19 @@ function is_admin(): bool {
     $role = $_SESSION['role'] ?? '';
     return stripos($role, 'admin') !== false;
 }
+
+function current_role(): string {
+    return (string) ($_SESSION['role'] ?? '');
+}
+
+function is_ict_admin(): bool {
+    return current_role() === 'ICT Admin';
+}
+
+/**
+ * CS-admin capabilities are shared by both CS Admin and HR Admin.
+ */
+function is_cs_admin(): bool {
+    $role = current_role();
+    return $role === 'CS Admin' || $role === 'HR Admin';
+}

@@ -105,10 +105,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$error) {
 
             // Build email content using helper
             $emailContent = build_password_reset_email($name, $link);
-            // Prefer HTML version; send_email will fall back to logging if SMTP/mail() not configured
-            logs_write('info', "Calling send_email function for: $email");
-            $sent = send_email($email, $emailContent['subject'], $emailContent['html'], true);
-            logs_write('info', "send_email returned: " . ($sent ? 'true' : 'false'));
+            // Prefer HTML version; insert internal notification and send email
+            logs_write('info', "Calling notify_and_email for: $email");
+            if (function_exists('notify_and_email')) {
+                notify_and_email($conn, 'applicant', $applicant_id, $email, $emailContent['subject'], $emailContent['html'], 'Password Reset');
+                $sent = true;
+            } else {
+                $sent = send_email($email, $emailContent['subject'], $emailContent['html'], true);
+            }
+            logs_write('info', "notify/send returned: " . ($sent ? 'true' : 'false'));
             
             if (!$sent) {
                 logs_write('error', 'Failed to send password reset email to ' . $email);

@@ -40,14 +40,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $next_of_kin_contact = trim($_POST['next_of_kin_contact'] ?? '');
     $username = trim($_POST['username'] ?? '');
     $status = trim($_POST['status'] ?? '');
+    $is_disabled = (trim($_POST['is_disabled'] ?? 'no') === 'yes') ? 1 : 0;
+    $disability_details = trim($_POST['disability_details'] ?? '');
 
     // Basic validation
     if (strlen($name) < 2) $error = 'Name too short';
     elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $error = 'Invalid email';
     elseif (!preg_match('/^[0-9+()\\s\\-]{6,25}$/', $contact)) $error = 'Invalid contact';
     else {
-        $u = $conn->prepare('UPDATE applicants SET name = ?, email = ?, contact = ?, next_of_kin_name = ?, next_of_kin_contact = ?, username = ?, status = ? WHERE applicant_id = ?');
-        $u->bind_param('ssssssss', $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $username, $status, $id);
+        // Check if disability columns exist
+        require_once __DIR__ . '/../includes/helpers.php';
+        $hasDisabilityFields = column_exists_db($conn, 'applicants', 'is_disabled') && column_exists_db($conn, 'applicants', 'disability_details');
+        
+        if ($hasDisabilityFields) {
+            $u = $conn->prepare('UPDATE applicants SET name = ?, email = ?, contact = ?, next_of_kin_name = ?, next_of_kin_contact = ?, username = ?, status = ?, is_disabled = ?, disability_details = ? WHERE applicant_id = ?');
+            $u->bind_param('ssssssssss', $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $username, $status, $is_disabled, $disability_details, $id);
+        } else {
+            $u = $conn->prepare('UPDATE applicants SET name = ?, email = ?, contact = ?, next_of_kin_name = ?, next_of_kin_contact = ?, username = ?, status = ? WHERE applicant_id = ?');
+            $u->bind_param('ssssssss', $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $username, $status, $id);
+        }
         if ($u->execute()) {
             $success = 'Applicant updated.';
             // refresh
@@ -75,13 +86,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <input type="email" name="email" value="<?= htmlspecialchars($app['email'] ?? '') ?>">
     <label>Contact</label>
     <input type="text" name="contact" value="<?= htmlspecialchars($app['contact'] ?? '') ?>">
-    <label>Next of kin</label>
+    <label>Next of Kin Name</label>
     <input type="text" name="next_of_kin_name" value="<?= htmlspecialchars($app['next_of_kin_name'] ?? '') ?>">
-    <label>NOK Contact</label>
+    <label>Next of Kin Contact</label>
     <input type="text" name="next_of_kin_contact" value="<?= htmlspecialchars($app['next_of_kin_contact'] ?? '') ?>">
     <label>Status</label>
     <input type="text" name="status" value="<?= htmlspecialchars($app['status'] ?? '') ?>">
+    <label style="margin-top: 16px; font-weight: 600;">Has Disability?</label>
+    <div style="margin-top: 8px; margin-bottom: 16px;">
+        <label style="font-weight: 600; margin-right: 20px;">
+            <input type="radio" name="is_disabled" value="no" <?= (empty($app['is_disabled']) || intval($app['is_disabled']) !== 1) ? 'checked' : '' ?>> 
+            No
+        </label>
+        <label style="font-weight: 600;">
+            <input type="radio" name="is_disabled" value="yes" <?= (isset($app['is_disabled']) && intval($app['is_disabled']) === 1) ? 'checked' : '' ?>> 
+            Yes
+        </label>
+    </div>
+    <div id="disability_details_wrap" style="margin-bottom: 16px; <?= (isset($app['is_disabled']) && intval($app['is_disabled']) === 1) ? '' : 'display:none;' ?>">
+        <label for="disability_details" style="font-weight: 600;">Disability Details</label>
+        <textarea id="disability_details" name="disability_details" rows="4" placeholder="Describe any disability and support needs" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-top: 8px;"><?= htmlspecialchars($app['disability_details'] ?? '') ?></textarea>
+    </div>
     <button type="submit">Save</button>
-    <a href="manage_applicants.php">Back</a>
+    <a href="manage_applicants.php" class="btn" style="background:#006400;color:#fff;border:1px solid #006400;padding:6px 8px;border-radius:4px;">Back</a>
 </form>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+    var disabilityRadios = document.querySelectorAll('input[name="is_disabled"]');
+    var detailsWrap = document.getElementById('disability_details_wrap');
+    
+    disabilityRadios.forEach(function(radio){
+        radio.addEventListener('change', function(){
+            if(this.value === 'yes'){
+                detailsWrap.style.display = 'block';
+            } else {
+                detailsWrap.style.display = 'none';
+            }
+        });
+    });
+});
+</script>
 </body></html>

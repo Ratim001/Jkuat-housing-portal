@@ -127,7 +127,7 @@ $tenant_name = isset($_SESSION['tenant_name']) ? $_SESSION['tenant_name'] : 'Ten
     <title>Tenant Dashboard | JKUAT Staff Housing Portal</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: #fff; }
+        body { font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif; background: #fff; }
         
         .topbar {
             display: flex; justify-content: space-between; align-items: center;
@@ -232,10 +232,65 @@ $tenant_name = isset($_SESSION['tenant_name']) ? $_SESSION['tenant_name'] : 'Ten
             color: white; border-radius: 50%; width: 18px; height: 18px;
             font-size: 12px; display: flex; align-items: center; justify-content: center;
         }
+        /* Hamburger Menu Styles */
+        .hamburger-menu {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .hamburger-menu span {
+            width: 25px;
+            height: 3px;
+            background-color: #006400;
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -250px;
+                z-index: 100;
+                transition: left 0.3s ease;
+            }
+            .hamburger-menu {
+                display: flex;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+        }
     </style>
 </head>
 <body>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
     <div class="topbar">
+        <button class="hamburger-menu" id="hamburgerBtn" onclick="toggleSidebar()">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
         <div class="logo">
             <img src="../images/2logo.png" alt="JKUAT Logo" style="height: 70px;">
         </div>
@@ -258,7 +313,7 @@ $tenant_name = isset($_SESSION['tenant_name']) ? $_SESSION['tenant_name'] : 'Ten
         </div>
     </div>
 
-    <div class="sidebar">
+    <div class="sidebar" id="sidebar">
         <h3><b>TENANT</b></h3>
         <a href="mytenants.php?section=serviceRequest"><span style="color: white; font-size: 18px;">🔧</span> Service Request</a>
         <a href="mytenants.php?section=serveNotice"><span style="color: white; font-size: 18px;">📝</span> Serve Notice</a>
@@ -522,6 +577,37 @@ $tenant_name = isset($_SESSION['tenant_name']) ? $_SESSION['tenant_name'] : 'Ten
             if (section) {
                 showSection(section);
             }
+        });
+
+        // Hamburger Menu Toggle Function
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        }
+
+        // Close sidebar when overlay is clicked
+        document.addEventListener('DOMContentLoaded', function() {
+            const overlay = document.getElementById('sidebarOverlay');
+            if (overlay) {
+                overlay.addEventListener('click', function() {
+                    const sidebar = document.getElementById('sidebar');
+                    sidebar.classList.remove('active');
+                    overlay.classList.remove('active');
+                });
+            }
+            
+            // Close sidebar when a link is clicked
+            const sidebarLinks = document.querySelectorAll('.sidebar a');
+            sidebarLinks.forEach(link => {
+                link.addEventListener('click', function() {
+                    const sidebar = document.getElementById('sidebar');
+                    const overlay = document.getElementById('sidebarOverlay');
+                    sidebar.classList.remove('active');
+                    overlay.classList.remove('active');
+                });
+            });
         });
     </script>
 </body>

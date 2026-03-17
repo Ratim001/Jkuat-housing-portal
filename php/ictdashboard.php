@@ -1,3 +1,12 @@
+<?php
+require_once '../includes/init.php';
+require_once '../includes/auth.php';
+
+if (!is_ict_admin()) {
+    header('Location: login.php');
+    exit;
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -65,6 +74,81 @@
             border-radius: 5px;
             cursor: pointer;
             margin-right: 10px;
+        }
+
+        /* Hamburger Menu Styles */
+        .hamburger-menu {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .hamburger-menu span {
+            width: 25px;
+            height: 3px;
+            background-color: #006400;
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -250px;
+                z-index: 100;
+                transition: left 0.3s ease;
+            }
+            .hamburger-menu {
+                display: flex;
+            }
+            .main-content {
+                margin-left: 0;
+                overflow-x: auto;
+            }
+            .top-header {
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: center;
+            }
+            .top-header h1 {
+                font-size: 18px;
+                flex: 1;
+                min-width: 200px;
+            }
+        }
+        @media (max-width: 480px) {
+            .sidebar {
+                width: 220px;
+            }
+            .top-header h1 {
+                font-size: 14px;
+            }
+            .logs-table {
+                font-size: 12px;
+            }
+            .logs-table th, .logs-table td {
+                padding: 8px 5px;
+            }
         }
     </style>
 </head>
@@ -166,8 +250,10 @@ if ($logType === 'houses') {
 }
 ?>
 
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
 <div class="dashboard-container">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
         <img src="../images/2logo.png" alt="Logo" class="logo">
         <h2>ICT ADMIN</h2>
         <p>DASHBOARD</p>
@@ -193,6 +279,11 @@ if ($logType === 'houses') {
 
     <main class="main-content">
         <header class="top-header">
+            <button class="hamburger-menu" id="hamburgerBtn" onclick="toggleSidebar()">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
             <h1>JKUAT STAFF HOUSING PORTAL</h1>
             <div class="header-actions">
                 <img src="../images/p-icon.png" alt="User Icon" class="user-icon" onclick="toggleMenu()">
@@ -238,6 +329,7 @@ if ($logType === 'houses') {
                                     <option value="">All</option>
                                     <option value="ICT Admin" <?= $selectedRole == 'ICT Admin' ? 'selected' : '' ?>>ICT Admin</option>
                                     <option value="CS Admin" <?= $selectedRole == 'CS Admin' ? 'selected' : '' ?>>CS Admin</option>
+                                    <option value="HR Admin" <?= $selectedRole == 'HR Admin' ? 'selected' : '' ?>>HR Admin</option>
                                 </select>
                             </th>
                             <th>Date Created</th>
@@ -369,7 +461,7 @@ if ($logType === 'houses') {
             <label>Name</label><input type="text" name="name" required>
             <label>Email</label><input type="email" name="email" required>
             <label>Role</label>
-            <select name="role" required><option value="ICT Admin">ICT Admin</option><option value="CS Admin">CS Admin</option></select>
+            <select name="role" required><option value="ICT Admin">ICT Admin</option><option value="CS Admin">CS Admin</option><option value="HR Admin">HR Admin</option></select>
             <label>Password</label><input type="password" name="password" required>
             <label>Status</label>
             <select name="status" required><option value="Active">Active</option><option value="Deactivated">Deactivated</option></select>
@@ -389,7 +481,7 @@ if ($logType === 'houses') {
             <label>Name</label><input type="text" name="edit_name" id="edit_name" required>
             <label>Email</label><input type="email" name="edit_email" id="edit_email" required>
             <label>Role</label>
-            <select name="edit_role" id="edit_role" required><option value="ICT Admin">ICT Admin</option><option value="CS Admin">CS Admin</option></select>
+            <select name="edit_role" id="edit_role" required><option value="ICT Admin">ICT Admin</option><option value="CS Admin">CS Admin</option><option value="HR Admin">HR Admin</option></select>
             <label>Status</label>
             <select name="edit_status" id="edit_status" required><option value="Active">Active</option><option value="Deactivated">Deactivated</option></select>
             <button type="submit" name="update_user" class="submit-btn">Update</button>
@@ -453,6 +545,37 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+});
+
+// Hamburger Menu Toggle Function
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Close sidebar when overlay is clicked
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    }
+    
+    // Close sidebar when a link is clicked
+    const sidebarLinks = document.querySelectorAll('.sidebar a');
+    sidebarLinks.forEach(link => {
+        link.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    });
 });
 </script>
 

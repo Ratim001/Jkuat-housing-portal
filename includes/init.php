@@ -58,3 +58,60 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 // Initialize Sentry stub if configured
 init_sentry_if_present();
+
+// Inject client-side pagination-length script before closing </body> on pages
+// We use output buffering to safely append the script tag into HTML pages.
+if (php_sapi_name() !== 'cli') {
+    if (!defined('JKUAT_HTML_INJECT')) {
+        define('JKUAT_HTML_INJECT', 1);
+    }
+    ob_start(function($buffer){
+        // Only inject into HTML responses. Never mutate JSON/API/text responses.
+        $looksLikeHtml = false;
+        if (is_string($buffer)) {
+            $b = ltrim($buffer);
+            if (
+                stripos($b, '<!doctype') === 0 ||
+                stripos($b, '<html') === 0 ||
+                stripos($b, '<body') === 0 ||
+                stripos($b, '<head') === 0 ||
+                stripos($b, '<div') === 0 ||
+                stripos($b, '<span') === 0 ||
+                stripos($b, '<table') === 0 ||
+                stripos($b, '<p') === 0 ||
+                stripos($b, '<h1') === 0 ||
+                stripos($b, '<h2') === 0 ||
+                stripos($b, '<h3') === 0
+            ) {
+                $looksLikeHtml = true;
+            }
+        }
+
+        if (!$looksLikeHtml) {
+            return $buffer;
+        }
+
+        // Avoid duplicate injection if scripts already exist in the HTML.
+        $scriptTag = "";
+        if (stripos($buffer, 'pagination-length.js') === false) {
+            $scriptTag .= "\n<script src=\"../js/pagination-length.js\"></script>\n";
+        }
+        
+        // Don't inject global-ui.js (back button) on login/registration pages
+        $currentFile = basename($_SERVER['SCRIPT_NAME'] ?? '');
+        $isLoginPage = in_array($currentFile, ['applicantlogin.php', 'login.php', 'register.php']);
+        
+        if (!$isLoginPage && stripos($buffer, 'global-ui.js') === false) {
+            $scriptTag .= "<script src=\"../js/global-ui.js\"></script>\n";
+        }
+
+        if ($scriptTag === '') {
+            return $buffer;
+        }
+        if (stripos($buffer, '</body>') !== false) {
+            return str_ireplace('</body>', $scriptTag . '</body>', $buffer);
+        }
+        // If no body tag found, append at end
+        return $buffer . $scriptTag;
+    });
+}

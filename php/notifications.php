@@ -12,23 +12,24 @@ if (!isset($_SESSION['tenant_id']) && !isset($_SESSION['applicant_id'])) {
 $user_type = '';
 $user_id = '';
 
-if (isset($_SESSION['tenant_id'])) {
-    $user_type = 'tenant';
-    $user_id = $_SESSION['tenant_id'];
-} elseif (isset($_SESSION['applicant_id'])) {
+// Prefer applicant session when both exist so applicants remain on applicant pages
+if (isset($_SESSION['applicant_id'])) {
     $user_type = 'applicant';
     $user_id = $_SESSION['applicant_id'];
-    
+
     // Check if applicant profile is complete
     $stmt = $conn->prepare("SELECT name, email, contact FROM applicants WHERE applicant_id = ?");
     $stmt->bind_param("s", $user_id);
     $stmt->execute();
     $profile_check = $stmt->get_result()->fetch_assoc();
-    
+
     if (empty($profile_check['name']) || empty($profile_check['email']) || empty($profile_check['contact'])) {
         header('Location: applicant_profile.php?redirect=notifications.php');
         exit;
     }
+} elseif (isset($_SESSION['tenant_id'])) {
+    $user_type = 'tenant';
+    $user_id = $_SESSION['tenant_id'];
 }
 
 // Handle logout
@@ -61,12 +62,12 @@ $unread_count = $unread_result->fetch_assoc()['unread'];
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif;
             background: #f4f4f4;
         }
         .topbar {
             display: flex; justify-content: space-between; align-items: center;
-            background: #fff; padding: 10px 20px; border-bottom: 1px solid #ccc;
+            background: #f7f7f7; padding: 10px 20px; border-bottom: 1px solid #e6e6e6;
             position: fixed; top: 0; left: 0; width: 100%; height: 70px; z-index: 10;
         }
         .topbar h2 { color: rgb(65, 172, 65); flex-grow: 1; text-align: center; }
@@ -116,17 +117,17 @@ $unread_count = $unread_result->fetch_assoc()['unread'];
         }
         .dropdown {
             display: none; position: absolute; top: 30px; right: 0;
-            background: white; border: 1px solid #ccc; width: 200px; z-index: 100;
+            background: #f7f7f7; border: 1px solid #e6e6e6; width: 200px; z-index: 100;
         }
         .dropdown a { display: block; padding: 10px; color: black; text-decoration: none; }
         .dropdown a:hover { background: #f1f1f1; }
         .icon-button { cursor: pointer; position: relative; }
         .notification-card {
-            background-color: white;
+            background-color: #f7f7f7;
             padding: 20px;
             margin-bottom: 15px;
             border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
         }
         .notification-title {
             font-weight: bold;
@@ -181,14 +182,21 @@ $unread_count = $unread_result->fetch_assoc()['unread'];
     <?php if ($notifications->num_rows > 0): ?>
         <?php while ($note = $notifications->fetch_assoc()): ?>
             <div class="notification-card" id="<?= htmlspecialchars($note['notification_id']) ?>">
-                <div class="notification-title">
-                    <?= htmlspecialchars($note['title'] ?? 'No Title') ?>
-                </div>
-                <div class="notification-body">
-                    <?= nl2br(htmlspecialchars($note['message'])) ?>
-                </div>
-                <div class="notification-date">
-                    <?= date('F j, Y, g:i a', strtotime($note['date_sent'])) ?>
+                <div style="display:flex;justify-content:space-between;align-items:start;">
+                    <div>
+                        <div class="notification-title">
+                            <?= htmlspecialchars($note['title'] ?? 'No Title') ?>
+                        </div>
+                        <div class="notification-body">
+                            <?= nl2br(htmlspecialchars($note['message'])) ?>
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <button onclick="deleteNotification('<?= htmlspecialchars($note['notification_id']) ?>')" style="background:#dc3545;color:#fff;border:none;padding:6px 8px;border-radius:4px;cursor:pointer;">Delete</button>
+                        <div class="notification-date" style="margin-top:8px;">
+                            <?= date('F j, Y, g:i a', strtotime($note['date_sent'])) ?>
+                        </div>
+                    </div>
                 </div>
             </div>
         <?php endwhile; ?>
@@ -212,6 +220,30 @@ window.onclick = function(event) {
         document.querySelectorAll('.dropdown').forEach(d => d.style.display = 'none');
     }
 };
+
+function deleteNotification(id) {
+    if (!confirm('Delete this notification?')) return;
+    fetch('delete_notification.php', {
+        method: 'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded'},
+        body: 'notification_id=' + encodeURIComponent(id)
+    }).then(async (r)=>{
+        const text = await r.text();
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            console.error('Non-JSON response from delete_notification.php:', text);
+            throw e;
+        }
+    }).then(j=>{
+        if (j.success) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        } else {
+            alert('Failed: ' + (j.error||'unknown'));
+        }
+    }).catch(e=>{ console.error(e); alert('Error deleting notification'); });
+}
 </script>
 
 </body>

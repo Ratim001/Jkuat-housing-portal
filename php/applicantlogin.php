@@ -3,6 +3,7 @@ require_once '../includes/init.php';
 require_once '../includes/db.php';
 require_once '../includes/validation.php';
 require_once '../includes/db.php';
+require_once __DIR__ . '/../includes/helpers.php';
 
 $error = '';
 $success = '';
@@ -19,16 +20,28 @@ function getTenantId($conn, $applicant_id) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    // Debug: log POST and FILES keys to help diagnose why the form may reload
+    $postKeys = is_array($_POST) ? array_keys($_POST) : [];
+    $fileErrors = [];
+    if (!empty($_FILES) && is_array($_FILES)) {
+        foreach ($_FILES as $k => $f) {
+            $fileErrors[$k] = isset($f['error']) ? $f['error'] : null;
+        }
+    }
+    logs_write('info', 'POST submission detected. POST keys: ' . json_encode($postKeys) . ' FILES errors: ' . json_encode($fileErrors));
     if (isset($_POST['action']) && $_POST['action'] === 'register') {
         // Collect and validate inputs
         $pf_number = trim($_POST['pf_number'] ?? '');
         $username = trim($_POST['username'] ?? '');
         $passwordRaw = $_POST['password'] ?? '';
+        $confirmPassword = $_POST['confirm_password'] ?? '';
         $name = trim($_POST['name'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $contact = trim($_POST['contact'] ?? '');
         $next_of_kin_name = trim($_POST['next_of_kin_name'] ?? '');
         $next_of_kin_contact = trim($_POST['next_of_kin_contact'] ?? '');
+        $role = $_POST['role'] ?? 'applicant';
+        $house_no = trim($_POST['house_no'] ?? '');
         
         // Debug logging
         logs_write('info', "Registration attempt: pf=$pf_number, username=$username, name=$name, kin_name=$next_of_kin_name, kin_contact=$next_of_kin_contact");
@@ -40,6 +53,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if (!validate_phone($next_of_kin_contact)) $validationErrors[] = 'Invalid next-of-kin contact.';
         if (!validate_username($username)) $validationErrors[] = 'Username must be at least 3 characters and contain only letters, numbers, underscore, dot or hyphen.';
         if (!validate_password($passwordRaw)) $validationErrors[] = 'Password must be at least 8 characters.';
+        if ($passwordRaw !== $confirmPassword) $validationErrors[] = 'Passwords do not match.';
 
         if (count($validationErrors) === 0) {
             // Check uniqueness
@@ -61,14 +75,69 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 }
                 $applicant_id = 'A' . str_pad($newIdNum, 3, '0', STR_PAD_LEFT);
 
+                // Handle optional photo upload
+                $photoDbPath = null;
+                if (!empty($_FILES['photo']['name'])) {
+                    $allowed = ['image/jpeg','image/png','image/gif'];
+                    if ($_FILES['photo']['error'] === UPLOAD_ERR_OK && in_array($_FILES['photo']['type'], $allowed)) {
+                        $uploadsDir = __DIR__ . '/../images/uploads';
+                        if (!is_dir($uploadsDir)) mkdir($uploadsDir, 0755, true);
+                        $ext = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
+                        $filename = $applicant_id . '_' . time() . '.' . $ext;
+                        $target = $uploadsDir . '/' . $filename;
+                        if (move_uploaded_file($_FILES['photo']['tmp_name'], $target)) {
+                            $photoDbPath = 'images/uploads/' . $filename;
+                        }
+                    }
+                }
+
                 $passwordHash = password_hash($passwordRaw, PASSWORD_DEFAULT);
                 $emailToken = bin2hex(random_bytes(24));
                 $status = 'Pending';
+                $is_disabled = (trim($_POST['is_disabled'] ?? 'no') === 'yes') ? 1 : 0;
+                $disability_details = trim($_POST['disability_details'] ?? '');
 
-                $insert = $conn->prepare("INSERT INTO applicants (applicant_id, pf_no, username, password, name, email, contact, next_of_kin_name, next_of_kin_contact, is_email_verified, email_verification_token, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                $insert->bind_param("sssssssssss", $applicant_id, $pf_number, $username, $passwordHash, $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $emailToken, $status);
+                require_once __DIR__ . '/../includes/helpers.php';
+                $hasDisabilityDetails = column_exists_db($conn, 'applicants', 'disability_details');
+                if ($hasDisabilityDetails) {
+                    $insert = $conn->prepare("INSERT INTO applicants (applicant_id, pf_no, username, password, name, email, contact, next_of_kin_name, next_of_kin_contact, role, photo, is_email_verified, email_verification_token, status, is_disabled, disability_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)");
+                    $insert->bind_param("sssssssssssssis", $applicant_id, $pf_number, $username, $passwordHash, $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $role, $photoDbPath, $emailToken, $status, $is_disabled, $disability_details);
+                } else {
+                    $insert = $conn->prepare("INSERT INTO applicants (applicant_id, pf_no, username, password, name, email, contact, next_of_kin_name, next_of_kin_contact, role, photo, is_email_verified, email_verification_token, status, is_disabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)");
+                    $insert->bind_param("sssssssssssss", $applicant_id, $pf_number, $username, $passwordHash, $name, $email, $contact, $next_of_kin_name, $next_of_kin_contact, $role, $photoDbPath, $emailToken, $status, $is_disabled);
+                }
                 if ($insert->execute()) {
                     logs_write('info', "Registration successful: applicant_id=$applicant_id, kin_name=$next_of_kin_name, kin_contact=$next_of_kin_contact");
+
+                    // If registered as an existing tenant, create a tenant record so they appear in Tenants list
+                    if ($role === 'tenant') {
+                        // Generate next tenant id
+                        $tq = $conn->query("SELECT tenant_id FROM tenants ORDER BY tenant_id DESC LIMIT 1");
+                        $nextTenantId = 'T001';
+                        if ($tq && $tl = $tq->fetch_assoc()) {
+                            $num = (int)substr($tl['tenant_id'], 1) + 1;
+                            $nextTenantId = 'T' . str_pad($num, 3, '0', STR_PAD_LEFT);
+                        }
+
+                        $today = date('Y-m-d');
+                        $insT = $conn->prepare("INSERT INTO tenants (tenant_id, applicant_id, house_no, move_in_date, status) VALUES (?, ?, ?, ?, ?)");
+                        if ($insT) {
+                            $st = 'Active';
+                            $insT->bind_param('sssss', $nextTenantId, $applicant_id, $house_no, $today, $st);
+                            if ($insT->execute()) {
+                                logs_write('info', "Created tenant record for applicant $applicant_id as $nextTenantId");
+                                if (!empty($house_no)) {
+                                    $u = $conn->prepare("UPDATE houses SET status = 'Occupied' WHERE house_no = ? LIMIT 1");
+                                    if ($u) { $u->bind_param('s', $house_no); $u->execute(); }
+                                }
+                                // Ensure applicant role is tenant
+                                $conn->query("UPDATE applicants SET role = 'tenant' WHERE applicant_id = '" . $conn->real_escape_string($applicant_id) . "'");
+                            } else {
+                                logs_write('error', 'Failed to create tenant record for ' . $applicant_id . ': ' . $conn->error);
+                            }
+                        }
+                    }
+
                     $success = "Registration created. A verification email has been sent; please verify before logging in.";
 
                     // Send verification email (fallback to log if SMTP not configured)
@@ -80,13 +149,33 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     if (file_exists($tpl)) {
                         $html = file_get_contents($tpl);
                         $bodyHtml = str_replace(['{{name}}','{{link}}'], [htmlspecialchars($name), $verifyLink], $html);
-                        send_email($email, $subject, $bodyHtml, true);
+                        if (function_exists('notify_and_email')) {
+                            $sent = notify_and_email($conn, 'applicant', $applicant_id, $email, $subject, $bodyHtml, 'Verify Email');
+                            logs_write('info', 'Verification email sent status (template): ' . ($sent ? 'sent' : 'failed'));
+                        } else {
+                            $sent = send_email($email, $subject, $bodyHtml, true);
+                            logs_write('info', 'Verification email sent status (template fallback): ' . ($sent ? 'sent' : 'failed'));
+                        }
                     } else {
                         $body = "Hello $name,\n\nPlease verify your email by clicking the link: $verifyLink\n\nIf you did not register, ignore this message.";
-                        send_email($email, $subject, $body, false);
+                        $bodyHtml = nl2br(htmlspecialchars($body));
+                        if (function_exists('notify_and_email')) {
+                            $sent = notify_and_email($conn, 'applicant', $applicant_id, $email, $subject, $bodyHtml, 'Verify Email');
+                            logs_write('info', 'Verification email sent status (text fallback): ' . ($sent ? 'sent' : 'failed'));
+                        } else {
+                            $sent = send_email($email, $subject, $body, false);
+                            logs_write('info', 'Verification email sent status (text fallback send_email): ' . ($sent ? 'sent' : 'failed'));
+                        }
                     }
 
-                    // Do not auto-login until email verified. Redirect to profile to allow completion if desired.
+                    // Set session so the newly registered user can complete their profile
+                    // without being bounced back to the login page. We still require
+                    // email verification before normal login but allow profile completion.
+                    session_regenerate_id(true);
+                    $_SESSION['applicant_id'] = $applicant_id;
+                    $_SESSION['username'] = $username;
+                    $_SESSION['profile_incomplete'] = true;
+
                     header('Location: applicant_profile.php?registered=1');
                     exit;
                 } else {
@@ -139,6 +228,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             if ($user = $res->fetch_assoc()) {
                 if (password_verify($password, $user['password'])) {
+                    // Enforce email verification if the column exists
+                    if (column_exists_db($conn, 'applicants', 'is_email_verified')) {
+                        if (empty($user['is_email_verified']) || intval($user['is_email_verified']) !== 1) {
+                            $error = 'Please verify your email address before logging in. Check your inbox for the verification email.';
+                            // do not authenticate
+                            goto _login_end;
+                        }
+                    }
                     $applicant_id = $user['applicant_id'];
                     session_regenerate_id(true);
 
@@ -169,6 +266,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             } else {
                 $error = "Applicant not found.";
             }
+            _login_end: ;
         }
     }
 }
@@ -181,7 +279,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <title>Applicant Login | JKUAT Staff Housing</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body, html { height: 100%; font-family: Arial, sans-serif; }
+        body, html { height: 100%; font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif; }
         .container {
             display: flex;
             height: 100vh;
@@ -290,14 +388,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <div class="card">
             <div class="form-container">
                 <img src="../images/2logo.png" alt="JKUAT Logo">
-                <h2><?= isset($_GET['register']) ? 'Register as Applicant' : 'Hi, welcome back' ?></h2>
+                <h2><?= isset($_GET['register']) ? 'Register as Applicant' : 'JKUAT STAFF HOUSING PORTAL' ?></h2>
                 <p style="text-align:center; margin-bottom: 10px; color: #888;">Please fill in your details to <?= isset($_GET['register']) ? 'register' : 'log in' ?></p>
 
                 <?php if ($error): ?><div class="message"><?= $error ?></div><?php endif; ?>
                 <?php if ($success): ?><div class="message success"><?= $success ?></div><?php endif; ?>
 
                 <?php if (isset($_GET['register'])): ?>
-                    <form method="POST">
+                    <form method="POST" enctype="multipart/form-data">
                         <input type="hidden" name="action" value="register">
                         <label>PF Number</label>
                         <input type="text" name="pf_number" required>
@@ -313,10 +411,24 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         <input type="text" name="next_of_kin_name" required>
                         <label>Next of Kin Contact</label>
                         <input type="text" name="next_of_kin_contact" required>
+                        <label>Role</label>
+                        <select name="role" required>
+                            <option value="applicant">Applicant</option>
+                            <option value="tenant">Existing Tenant</option>
+                        </select>
+                        <label>House No (if Existing Tenant)</label>
+                        <input type="text" name="house_no" placeholder="e.g. 101">
+                        <label>Photo (optional)</label>
+                        <input type="file" name="photo" accept="image/*">
                         <label>Password</label>
                         <input type="password" name="password" id="regPassword" required>
                         <div class="show-password">
                             <input type="checkbox" onclick="togglePassword('regPassword')"> Show Password
+                        </div>
+                        <label>Confirm Password</label>
+                        <input type="password" name="confirm_password" id="regConfirmPassword" required>
+                        <div class="show-password">
+                            <input type="checkbox" onclick="togglePassword('regConfirmPassword')"> Show Password
                         </div>
                         <button type="submit" class="btn">Register</button>
                     </form>
@@ -341,7 +453,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                         <button type="submit" class="btn">Sign In</button>
                     </form>
                     <div class="toggle-link">
-                        Don't have an account? <a href="?register=1">Register</a>
+                        Don't have an account? <a href="register.php">Register</a>
                     </div>
                 <?php endif; ?>
             </div>
@@ -358,6 +470,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             field.type = "password";
         }
     }
+</script>
+<script>
+    // Show/hide house_no input when role = tenant
+    document.addEventListener('DOMContentLoaded', function(){
+        const roleSelect = document.querySelector('select[name="role"]');
+        const houseInput = document.querySelector('input[name="house_no"]');
+        if (!roleSelect || !houseInput) return;
+        function updateHouseVisibility(){
+            if (roleSelect.value === 'tenant') {
+                houseInput.parentElement.style.display = 'block';
+            } else {
+                houseInput.parentElement.style.display = 'none';
+                houseInput.value = '';
+            }
+        }
+        // Ensure the house input is inside its own block (it already is) and toggle
+        updateHouseVisibility();
+        roleSelect.addEventListener('change', updateHouseVisibility);
+    });
 </script>
 
 </body>

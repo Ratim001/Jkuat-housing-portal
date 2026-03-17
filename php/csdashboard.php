@@ -17,10 +17,10 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        body { font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
         .sidebar {
-            width: 250px; background-color: #006400; color: #fff;
-            height: 100vh; position: fixed; padding: 20px 10px;
+            width: 220px; background-color: #004225; color: #fff;
+            height: 100vh; position: fixed; padding: 20px 0;
         }
         .sidebar img { width: 60px; margin-bottom: 10px; }
         .sidebar h2, .sidebar p { margin-bottom: 10px; }
@@ -30,7 +30,7 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
             color: #fff; text-decoration: none; font-weight: bold;
         }
 
-        .main-content { margin-left: 250px; padding: 20px; }
+        .main-content { margin-left: 220px; padding: 40px; }
 
         .top-header {
             background-color: #fff; padding: 15px;
@@ -74,6 +74,7 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             margin-top: 20px;
+            margin-bottom: 20px;
         }
 
         .card {
@@ -82,7 +83,7 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
             border-radius: 12px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.1);
             text-align: center;
-            border-top: 4px solid #28a745;
+            border-top: 4px solid #006400;
             transition: 0.3s;
         }
 
@@ -93,22 +94,23 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
         .card i {
             font-size: 36px;
             margin-bottom: 10px;
-            color: #28a745;
+            color: #006400;
         }
 
         .card h3 { margin: 10px 0; color: #333; }
         .card p {
             font-size: 22px;
-            color: #006400;
+            color: #004225;
             font-weight: bold;
         }
 
         #chart-container {
-            margin-top: 40px;
+            margin-top: 30px;
             background: #fff;
             padding: 20px;
             border-radius: 12px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            max-width: 100%;
         }
 
         footer {
@@ -117,11 +119,94 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
             font-size: 12px;
             color: #666;
         }
+
+        /* Hamburger Menu Styles */
+        .hamburger-menu {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .hamburger-menu span {
+            width: 25px;
+            height: 3px;
+            background-color: #004225;
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -220px;
+                z-index: 100;
+                transition: left 0.3s ease;
+            }
+            .hamburger-menu {
+                display: flex;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+            .top-header {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .top-header h1 {
+                font-size: 18px;
+                flex: 1;
+                min-width: 200px;
+            }
+            .cards {
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+            }
+            .card {
+                padding: 15px;
+            }
+            .card i {
+                font-size: 24px;
+            }
+        }
+        @media (max-width: 480px) {
+            .sidebar {
+                width: 200px;
+            }
+            .top-header h1 {
+                font-size: 14px;
+            }
+            .cards {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
 
-<div class="sidebar">
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="sidebar" id="sidebar">
     <img src="../images/2logo.png" alt="Logo">
     <h2>CS ADMIN</h2>
     <p>DASHBOARD</p>
@@ -141,6 +226,11 @@ $sentCount = mysqli_num_rows(mysqli_query($conn, "SELECT * FROM notifications"))
 
 <div class="main-content">
     <header class="top-header">
+        <button class="hamburger-menu" id="hamburgerBtn" onclick="toggleSidebar()">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
         <h1>JKUAT STAFF HOUSING PORTAL</h1>
         <div style="position: relative;">
             <img src="../images/p-icon.png" alt="User Icon" class="user-icon" onclick="toggleMenu()">
@@ -222,6 +312,37 @@ const summaryChart = new Chart(ctx, {
             y: { beginAtZero: true }
         }
     }
+});
+
+// Hamburger Menu Toggle Function
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Close sidebar when overlay is clicked
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    }
+    
+    // Close sidebar when a link is clicked
+    const sidebarLinks = document.querySelectorAll('.sidebar a');
+    sidebarLinks.forEach(link => {
+        link.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    });
 });
 </script>
 

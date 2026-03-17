@@ -155,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap">
     <style>
         body {
-            font-family: 'Roboto', sans-serif;
+            font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif;
         }
         .filter-bar {
             display: flex;
@@ -184,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background-color: #f1f1f1;
         }
         .main-content {
-            margin-left: 250px;
+            margin-left: 220px;
             padding: 20px;
             background-color: white;
             min-height: 100vh;
@@ -293,10 +293,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background-color: #ffc107;
             color: #212529;
         }
+        /* Hamburger Menu Styles */
+        .hamburger-menu {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .hamburger-menu span {
+            width: 25px;
+            height: 3px;
+            background-color: #006400;
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -250px;
+                z-index: 100;
+                transition: left 0.3s ease;
+            }
+            .hamburger-menu {
+                display: flex;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+        }
     </style>
 </head>
 <body>
-<div class="sidebar">
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+<div class="sidebar" id="sidebar">
     <img src="../images/2logo.png" alt="Logo">
     <h2>CS ADMIN</h2>
     <p>BILLS</p>
@@ -315,6 +365,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </div>
 <div class="main-content">
     <div class="top-header">
+        <button class="hamburger-menu" id="hamburgerBtn" onclick="toggleSidebar()">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
         <h1>JKUAT STAFF HOUSING PORTAL</h1>
         <img src="../images/p-icon.png" alt="Profile Icon" class="user-icon" onclick="alert('Profile menu coming soon.')">
     </div>
@@ -512,6 +567,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             alert('An error occurred while updating the amount.');
         });
     });
+
+// Hamburger Menu Toggle Function
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Close sidebar when overlay is clicked
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    }
+    
+    // Close sidebar when a link is clicked
+    const sidebarLinks = document.querySelectorAll('.sidebar a');
+    sidebarLinks.forEach(link => {
+        link.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    });
+});
 </script>
 </body>
 </html>

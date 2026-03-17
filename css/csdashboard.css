@@ -1,18 +1,21 @@
    body {
-    font-family: Arial, sans-serif;
+    font-family: 'Segoe UI', 'Inter', 'Roboto', Arial, sans-serif;
     margin: 0;
     padding: 0;
     background-color: #f4f4f4;
 }
 
 .sidebar {
-    width: 250px;
-    background-color: #006400;
+    width: 220px;
+    background-color: #004225;
     color: #fff;
     height: 100vh;
     position: fixed;
-    padding: 20px 10px;
+    left: 0;
+    top: 0;
+    padding: 20px 0;
     overflow-y: auto;
+    z-index: 50;
 }
 
 .sidebar img {
@@ -51,17 +54,41 @@
 }
 
 .main-content {
-    margin-left: 250px;
-    padding: 20px;
+    margin-left: 220px;
+    padding: 40px;
+    width: calc(100% - 220px);
+    background-color: #f4f4f4;
+    min-height: 100vh;
+}
+
+/* Make content area responsive and prevent horizontal overflow */
+.main-content, .content {
+    box-sizing: border-box;
+    max-width: calc(100% - 220px);
+    overflow-x: hidden;
+}
+
+/* Make tables responsive */
+.main-content table, .content table {
+    width: 100%;
+    table-layout: auto;
+}
+.table-responsive { overflow-x: auto; }
+
+/* Ensure main content forms its own stacking context so navigated pages
+   fully replace dashboard content instead of appearing on top of it. */
+.main-content {
+    position: relative;
+    z-index: 10;
 }
 
 .top-header {
-    background-color: #fff;
+    background-color: #f7f7f7;
     padding: 15px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 2px solid #ddd;
+    border-bottom: 1px solid #e6e6e6;
 }
 
 .top-header h1 {
@@ -81,16 +108,22 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 20px;
     margin-top: 20px;
+    margin-bottom: 20px;
 }
 
 .card {
     min-width: 200px;
     background-color: #fff;
     padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     text-align: center;
-    border-top: 4px solid #28a745;
+    border-top: 4px solid #006400;
+    transition: 0.3s;
+}
+
+.card:hover {
+    transform: translateY(-3px);
 }
 
 .card h3 {
@@ -98,9 +131,126 @@
     color: #333;
 }
 
+.card p {
+    font-size: 22px;
+    color: #004225;
+    font-weight: bold;
+}
+
 footer {
     text-align: center;
     margin-top: 30px;
     font-size: 12px;
     color: #666;
+}
+
+/* Hamburger Menu Styles */
+.hamburger-menu {
+    display: none;
+    flex-direction: column;
+    cursor: pointer;
+    gap: 5px;
+    background: none;
+    border: none;
+    padding: 10px;
+}
+
+.hamburger-menu span {
+    width: 25px;
+    height: 3px;
+    background-color: #004225;
+    border-radius: 2px;
+    transition: 0.3s;
+}
+
+.sidebar.active {
+    left: 0;
+}
+
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+}
+
+.sidebar-overlay.active {
+    display: block;
+}
+
+/* Collapsed sidebar (used when navigating from dashboard to hide menu) */
+.sidebar.collapsed {
+    left: -220px !important;
+}
+
+/* When sidebar is collapsed, the main content should take full width */
+.main-content.sidebar-collapsed {
+    margin-left: 0 !important;
+    width: 100% !important;
+    padding-left: 20px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        left: -220px;
+        z-index: 100;
+        transition: left 0.3s ease;
+    }
+
+    .hamburger-menu {
+        display: flex;
+    }
+
+    .main-content {
+        margin-left: 0;
+        width: 100%;
+        padding: 20px;
+    }
+
+    .top-header {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .top-header h1 {
+        font-size: 18px;
+        flex: 1;
+    }
+
+    .cards {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+    }
+
+    .card {
+        padding: 15px;
+    }
+
+    table {
+        font-size: 12px;
+    }
+
+    th, td {
+        padding: 6px;
+    }
+}
+
+@media (max-width: 480px) {
+    .sidebar {
+        width: 200px;
+    }
+
+    .top-header h1 {
+        font-size: 14px;
+    }
+
+    .cards {
+        grid-template-columns: 1fr;
+    }
 }

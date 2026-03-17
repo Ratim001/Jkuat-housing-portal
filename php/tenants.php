@@ -1,5 +1,6 @@
 <?php
-include '../includes/db.php';
+require_once '../includes/init.php';
+require_once '../includes/db.php';
 
 // Handle notification form submission directly here
 $notificationSuccess = false;
@@ -19,35 +20,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tenant_id'], $_POST['
         $newId = 'NT001';
     }
 
-    // Insert into notifications
-    $insertQuery = "
-        INSERT INTO notifications (
-            notification_id,
-            user_id,
-            recipient_type,
-            recipient_id,
-            message,
-            date_sent,
-            date_received
-        ) VALUES (
-            '$newId',
-            '$user_id',
-            '$recipient_type',
-            '$tenant_id',
-            '$message',
-            NOW(),
-            NOW()
-        )
-    ";
-
-    if (mysqli_query($conn, $insertQuery)) {
+    // Use the safe notifier to create a notification with title 'Admin'
+    $notificationId = uniqid('NT');
+    $adminId = $user_id;
+    $dateSent = date('Y-m-d H:i:s');
+    // Fetch tenant/applicant name for greeting
+    $resA = mysqli_query($conn, "SELECT name FROM applicants WHERE applicant_id = (SELECT applicant_id FROM tenants WHERE tenant_id = '{$tenant_id}' LIMIT 1)");
+    $an = ($resA && $r = mysqli_fetch_assoc($resA)) ? $r['name'] : 'Tenant';
+    $msgFormatted = "Dear \"{$an}\": " . $message;
+    if (function_exists('notify_insert_safe')) {
+        notify_insert_safe($conn, $notificationId, $adminId, 'tenant', $tenant_id, $msgFormatted, $dateSent, 'unread', 'Admin');
         $notificationSuccess = true;
     } else {
-        echo "Database error: " . mysqli_error($conn);
+        // Fallback: insert directly with title column if present
+        $insertQuery = "INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, message, title, date_sent, date_received) VALUES ('{$notificationId}', '{$adminId}', 'tenant', '{$tenant_id}', '" . mysqli_real_escape_string($conn, $msgFormatted) . "', 'Admin', NOW(), NOW())";
+        $notificationSuccess = mysqli_query($conn, $insertQuery);
     }
 }
 
 // Load tenant list
+// Only include tenants whose applicant record was created with role='tenant'
 $query = "
     SELECT 
         t.tenant_id,
@@ -57,9 +49,11 @@ $query = "
         t.status,
         a.pf_no,
         a.name,
-        a.email
+        a.email,
+        a.role
     FROM tenants t
     JOIN applicants a ON t.applicant_id = a.applicant_id
+    WHERE a.role = 'tenant'
 ";
 
 $result = mysqli_query($conn, $query);
@@ -192,11 +186,86 @@ $result = mysqli_query($conn, $query);
         border: 1px solid #c3e6cb;
         border-radius: 5px;
     }
+
+        /* Hamburger Menu Styles */
+        .hamburger-menu {
+            display: none;
+            flex-direction: column;
+            cursor: pointer;
+            gap: 5px;
+            background: none;
+            border: none;
+            padding: 10px;
+        }
+        .hamburger-menu span {
+            width: 25px;
+            height: 3px;
+            background-color: #006400;
+            border-radius: 2px;
+            transition: 0.3s;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 99;
+        }
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -250px;
+                z-index: 100;
+                transition: left 0.3s ease;
+            }
+            .hamburger-menu {
+                display: flex;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+            .top-header {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .top-header h1 {
+                font-size: 18px;
+                flex: 1;
+            }
+            table {
+                font-size: 12px;
+            }
+            th, td {
+                padding: 6px;
+            }
+        }
+        @media (max-width: 480px) {
+            .sidebar {
+                width: 220px;
+            }
+            .top-header h1 {
+                font-size: 14px;
+            }
+        }
     </style>
 </head>
 <body>
 
-<div class="sidebar">
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="sidebar" id="sidebar">
     <img src="../images/2logo.png" alt="Logo">
     <h2>CS ADMIN</h2>
     <p>TENANTS</p>
@@ -216,6 +285,11 @@ $result = mysqli_query($conn, $query);
 
 <div class="main-content">
     <header class="top-header">
+        <button class="hamburger-menu" id="hamburgerBtn" onclick="toggleSidebar()">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
         <h1>JKUAT STAFF HOUSING PORTAL</h1>
         <img src="../images/p-icon.png" alt="User Icon" class="user-icon" onclick="toggleMenu()">
     </header>
@@ -296,6 +370,37 @@ function terminateTenant(tenantId) {
         document.getElementById('terminateForm').submit();
     }
 }
+
+// Hamburger Menu Toggle Function
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    sidebar.classList.toggle('active');
+    overlay.classList.toggle('active');
+}
+
+// Close sidebar when overlay is clicked
+document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+        overlay.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    }
+    
+    // Close sidebar when a link is clicked
+    const sidebarLinks = document.querySelectorAll('.sidebar a');
+    sidebarLinks.forEach(link => {
+        link.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    });
+});
 </script>
 
 </body>

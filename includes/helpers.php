@@ -51,6 +51,156 @@ function logs_write($level, $message) {
     file_put_contents($file, $line, FILE_APPEND | LOCK_EX);
 }
 
+// Check if a column exists in a table (returns bool)
+function column_exists_db($conn, $table, $column) {
+    $t = $conn->real_escape_string($table);
+    $c = $conn->real_escape_string($column);
+    $schemaRes = $conn->query("SELECT DATABASE() as db");
+    $schema = $schemaRes ? $schemaRes->fetch_assoc()['db'] : null;
+    if (!$schema) return false;
+    $q = $conn->prepare("SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+    $q->bind_param('sss', $schema, $t, $c);
+    $q->execute();
+    $r = $q->get_result()->fetch_assoc();
+    return ($r && $r['cnt'] > 0);
+}
+
+// Insert a notification safely; uses `title` column when present
+function notify_insert_safe($conn, $notificationId, $adminId, $recipientType, $recipientId, $message, $dateSent, $status = 'unread', $title = null) {
+    static $hasTitle = null;
+    if ($hasTitle === null) {
+        $hasTitle = column_exists_db($conn, 'notifications', 'title');
+    }
+
+    // Ensure the provided adminId exists in the `users` table; if not, fall back to 'system'.
+    $checkStmt = $conn->prepare("SELECT 1 FROM users WHERE user_id = ? LIMIT 1");
+    if ($checkStmt) {
+        $checkStmt->bind_param('s', $adminId);
+        $checkStmt->execute();
+        $r = $checkStmt->get_result();
+        $exists = (bool) ($r && $r->fetch_assoc());
+        $checkStmt->close();
+        if (!$exists) {
+            $systemId = 'system';
+            // create system user if missing
+            $c2 = $conn->prepare("SELECT 1 FROM users WHERE user_id = ? LIMIT 1");
+            if ($c2) {
+                $c2->bind_param('s', $systemId);
+                $c2->execute();
+                $r2 = $c2->get_result();
+                $sysExists = (bool) ($r2 && $r2->fetch_assoc());
+                $c2->close();
+                if (!$sysExists) {
+                    $now = date('Y-m-d H:i:s');
+                    $insSql = "INSERT INTO users (user_id, username, name, email, role, date_created, status) VALUES (?, ?, ?, ?, 'system', ?, 'active')";
+                    $ins = $conn->prepare($insSql);
+                    if ($ins) {
+                        $ins->bind_param('sssss', $systemId, $systemId, $systemId, $systemId, $now);
+                        if (!$ins->execute()) {
+                            logs_write('error', 'Failed to create system user in notify_insert_safe: ' . $ins->error);
+                        }
+                        $ins->close();
+                    } else {
+                        logs_write('error', 'Prepare failed creating system user in notify_insert_safe: ' . $conn->error);
+                    }
+                }
+            }
+            $adminId = $systemId;
+        }
+    }
+
+    $msgEsc = mysqli_real_escape_string($conn, $message);
+    $notificationIdEsc = $conn->real_escape_string($notificationId);
+    $adminIdEsc = $conn->real_escape_string($adminId);
+    $recipientTypeEsc = $conn->real_escape_string($recipientType);
+    $recipientIdEsc = $conn->real_escape_string($recipientId);
+    $dateSentEsc = $conn->real_escape_string($dateSent);
+    $statusEsc = $conn->real_escape_string($status);
+
+    if ($hasTitle && $title !== null) {
+        $titleEsc = $conn->real_escape_string($title);
+        $sql = "INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, title, message, date_sent, date_received, status) VALUES ('{$notificationIdEsc}', '{$adminIdEsc}', '{$recipientTypeEsc}', '{$recipientIdEsc}', '{$titleEsc}', '{$msgEsc}', '{$dateSentEsc}', '{$dateSentEsc}', '{$statusEsc}')";
+    } else {
+        $sql = "INSERT INTO notifications (notification_id, user_id, recipient_type, recipient_id, message, date_sent, date_received, status) VALUES ('{$notificationIdEsc}', '{$adminIdEsc}', '{$recipientTypeEsc}', '{$recipientIdEsc}', '{$msgEsc}', '{$dateSentEsc}', '{$dateSentEsc}', '{$statusEsc}')";
+    }
+    return $conn->query($sql);
+}
+
+/**
+ * notify_and_email
+ * Inserts a notification into the database (if table exists) and attempts to send an email.
+ * Parameters:
+ *  - $conn: mysqli connection
+ *  - $recipientType: 'applicant'|'tenant'|'admin' etc
+ *  - $recipientId: id corresponding to recipientType (applicant_id, tenant_id, or literal 'admin')
+ *  - $email: recipient email address (may be null)
+ *  - $subject: email subject
+ *  - $htmlBody: HTML content for the email (string)
+ *  - $title: optional short title to store in notifications.title when present
+ */
+function notify_and_email($conn, $recipientType, $recipientId, $email, $subject, $htmlBody, $title = null) {
+    $adminId = $_SESSION['user_id'] ?? 'system';
+    // Ensure the chosen adminId exists in `users`. If it doesn't, fall back to a dedicated `system` user.
+    $stmt = $conn->prepare("SELECT 1 FROM users WHERE user_id = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param('s', $adminId);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $exists = (bool) ($res && $res->fetch_assoc());
+        $stmt->close();
+        if (!$exists) {
+            // Ensure a `system` user exists; create it if missing
+            $systemId = 'system';
+            $stmt2 = $conn->prepare("SELECT 1 FROM users WHERE user_id = ? LIMIT 1");
+            if ($stmt2) {
+                $stmt2->bind_param('s', $systemId);
+                $stmt2->execute();
+                $res2 = $stmt2->get_result();
+                $sysExists = (bool) ($res2 && $res2->fetch_assoc());
+                $stmt2->close();
+                if (!$sysExists) {
+                    $now = date('Y-m-d H:i:s');
+                    // Insert a minimal `system` user record. Use matching placeholders and bindings.
+                    $insSql = "INSERT INTO users (user_id, username, name, email, role, date_created, status) VALUES (?, ?, ?, ?, 'system', ?, 'active')";
+                    $ins = $conn->prepare($insSql);
+                    if ($ins) {
+                        $ins->bind_param('sssss', $systemId, $systemId, $systemId, $systemId, $now);
+                        if (!$ins->execute()) {
+                            logs_write('error', 'Failed to create system user: ' . $ins->error);
+                        }
+                        $ins->close();
+                    } else {
+                        logs_write('error', 'Prepare failed when creating system user: ' . $conn->error);
+                    }
+                }
+            }
+            $adminId = $systemId;
+        }
+    }
+    $dateSent = date('Y-m-d H:i:s');
+    $notificationId = uniqid('NT');
+    // Fallback message: strip tags for notification body
+    $message = trim(strip_tags($htmlBody));
+    // Insert notification if notifications table exists (helper handles missing title column)
+    if (function_exists('notify_insert_safe')) {
+        notify_insert_safe($conn, $notificationId, $adminId, $recipientType, $recipientId, $message, $dateSent, 'unread', $title);
+    }
+
+    // Send email if an email address is provided
+    $sent = false;
+    if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        // Try to send HTML email; send_email already logs failures and returns bool
+        try {
+            $sent = send_email($email, $subject, $htmlBody, true);
+        } catch (Exception $e) {
+            logs_write('error', 'notify_and_email send_email failed: ' . $e->getMessage());
+            $sent = false;
+        }
+    }
+
+    return $sent;
+}
+
 /**
  * send_email
  * Prefer PHPMailer (composer) if available, otherwise use mail() and log the email.
@@ -78,8 +228,9 @@ function send_email($to, $subject, $body, $isHtml = false) {
     logs_write('info', "Config loaded. SMTP_HOST: " . ($config['SMTP_HOST'] ?? '[EMPTY]'));
     
     $appUrl = rtrim(getenv('APP_URL') ?: ($config['APP_URL'] ?? 'http://localhost'), '/');
-    $from = 'noreply@demomailtrap.co';  // Use verified Mailtrap domain
-    logs_write('info', "From address: $from");
+    $from = getenv('SMTP_USER') ?: ($config['SMTP_USER'] ?? 'isaak.mohamed@jkuat.ac.ke');  // Gmail sender address
+    $fromName = 'HR admin';  // Sender's display name
+    logs_write('info', "From address: $from (Display: $fromName)");
 
     // Try PHPMailer if installed
     $autoload = __DIR__ . '/../vendor/autoload.php';
@@ -109,8 +260,10 @@ function send_email($to, $subject, $body, $isHtml = false) {
                 } else {
                     logs_write('warning', 'No SMTP_HOST configured, using local mail() fallback');
                 }
-                
-                $mail->setFrom($from, 'JKUAT Housing');
+                // Ensure UTF-8 charset so characters like em-dash render correctly
+                $mail->CharSet = 'UTF-8';
+                $mail->Encoding = 'quoted-printable';
+                $mail->setFrom($from, $fromName);
                 $mail->addAddress($to);
                 $mail->Subject = $subject;
                 if ($isHtml) {
@@ -162,4 +315,35 @@ function init_sentry_if_present() {
     if (!$dsn) return;
     // TODO: Add composer dependency "sentry/sdk" and initialize here.
     logs_write('info', 'SENTRY_DSN provided but Sentry SDK not installed - stubbed');
+}
+
+/**
+ * get_tenant_for_applicant
+ * Returns associative tenant row for given applicant_id or null when none.
+ */
+function get_tenant_for_applicant($conn, $applicant_id) {
+    if (empty($applicant_id) || !$conn) return null;
+    $stmt = $conn->prepare("SELECT tenant_id, applicant_id, house_no, move_in_date, move_out_date, status FROM tenants WHERE applicant_id = ? AND status = 'active' LIMIT 1");
+    if (!$stmt) return null;
+    $stmt->bind_param('s', $applicant_id);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $row = $res ? $res->fetch_assoc() : null;
+    $stmt->close();
+    return $row ?: null;
+}
+
+/**
+ * ensure_session_tenant
+ * Convenience: set $_SESSION['tenant_id'] if applicant has an active tenant record.
+ */
+function ensure_session_tenant($conn) {
+    if (empty($_SESSION['applicant_id'])) return null;
+    if (!empty($_SESSION['tenant_id'])) return $_SESSION['tenant_id'];
+    $t = get_tenant_for_applicant($conn, $_SESSION['applicant_id']);
+    if ($t && !empty($t['tenant_id'])) {
+        $_SESSION['tenant_id'] = $t['tenant_id'];
+        return $_SESSION['tenant_id'];
+    }
+    return null;
 }

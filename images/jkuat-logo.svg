@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="60" viewBox="0 0 240 60" role="img" aria-label="JKUAT logo">
+  <defs>
+    <linearGradient id="g1" x1="0" x2="1">
+      <stop offset="0" stop-color="#007a33"/>
+      <stop offset="1" stop-color="#28a745"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="60" rx="6" fill="none"/>
+  <g transform="translate(8,6)">
+    <circle cx="24" cy="24" r="20" fill="url(#g1)" />
+    <text x="52" y="34" font-family="Segoe UI, Roboto, Arial, sans-serif" font-size="22" font-weight="700" fill="#0b3d19">JKUAT</text>
+    <text x="52" y="50" font-family="Segoe UI, Roboto, Arial, sans-serif" font-size="10" fill="#0b3d19">Staff Housing Portal</text>
+  </g>
+</svg>

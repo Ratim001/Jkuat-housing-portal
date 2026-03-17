@@ -1,6 +1,18 @@
 # Migrations
 
-Run migrations against your MySQL database using the command below:
+Preferred: run all migrations (SQL + PHP) using the migration runner:
+
+```sh
+php migrations/run_migrations.php
+```
+
+Check what is pending without applying:
+
+```sh
+php migrations/run_migrations.php --status
+```
+
+Manual (single SQL file) option:
 
 ```sh
 mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" < migrations/2026-02-11_add_applicant_profile_fields.sql
